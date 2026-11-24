@@ -47,12 +47,18 @@ _agent = SDLCAgent()
 
 TEXT_REQUIREMENTS_INSTRUCTION = (
     "Generate the complete list of functional, security, compliance, performance, "
-    "and usability requirements for the project described below."
+    "and usability requirements for the project described below. "
+    "Only include security and compliance requirements that are clearly relevant to this specific project — "
+    "do not inject generic finance boilerplate for projects that are simple internal tools, dashboards, or prototypes. "
+    "Mark any requirement sourced from general domain knowledge (not explicitly in the description) as ASSUMPTION."
 )
 
 PDF_REQUIREMENTS_INSTRUCTION = (
     "Using the uploaded PDF as the primary evidence, generate specific, testable, "
-    "IEEE-830 compliant finance software requirements."
+    "IEEE-830 compliant finance software requirements. "
+    "Only extract requirements that are supported by or directly implied by the document content. "
+    "Mark anything added from general finance knowledge (not in the PDF) as ASSUMPTION, not INFERRED. "
+    "Do not inject regulatory or security boilerplate unless the document explicitly addresses those domains."
 )
 
 
@@ -159,7 +165,11 @@ def full_pipeline_text(body: FullPipelineTextRequest):
 
         # Step 2: SDLC recommendation
         combined = f"{body.project_description}\n\n--- EXTRACTED REQUIREMENTS ---\n{requirements_md}"
-        report = _agent.recommend_from_text(combined, project_name=body.project_name)
+        report = _agent.recommend_from_text(
+            combined,
+            project_name=body.project_name,
+            project_description=body.project_description,
+        )
 
         # Step 3: Persist outputs
         safe = _safe_output_name(body.project_name)
@@ -206,7 +216,11 @@ async def full_pipeline_pdf(
             inbuilt_instruction=PDF_REQUIREMENTS_INSTRUCTION,
         )
 
-        report = _agent.recommend_from_text(requirements_md, project_name=project_name)
+        report = _agent.recommend_from_text(
+            requirements_md,
+            project_name=project_name,
+            project_description=requested_functionality,
+        )
 
         safe = _safe_output_name(project_name)
         (OUTPUT_DIR / f"{safe}_requirements.md").write_text(requirements_md, encoding="utf-8")

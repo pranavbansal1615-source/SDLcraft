@@ -3,37 +3,23 @@ sdlc_agent.py — SDLC Recommendation Agent for SDLcraft (Finance Projects)
 
 Given a set of extracted software requirements (plain text or structured list),
 this agent:
-  1. Analyses project characteristics (dimensions) from the requirements text.
+  1. Analyses project characteristics (dimensions) from the requirements text
+     AND the original project description separately.
   2. Runs Multi-Criteria Decision Analysis (MCDA) with finance-aware dynamic weights.
   3. Performs sensitivity analysis (+/- 20 %) to validate robustness.
   4. Selects the best-fit SDLC model from a comprehensive catalogue.
   5. Generates a tailored workflow for the chosen model.
   6. Returns a fully-structured SDLCReport (Pydantic) and a Markdown summary.
 
-Usage
------
-    from sdlc_agent import SDLCAgent
-
-    agent = SDLCAgent()
-
-    # From plain-text requirements / project description
-    report = agent.recommend_from_text(
-        requirements_text=\"\"\"
-        - The system shall support KYC verification via Aadhaar OCI.
-        - Loan disbursal must complete within 30 seconds of approval.
-        - All PII must be encrypted at rest using AES-256.
-        - The system shall comply with RBI Digital Lending Guidelines 2025.
-        \"\"\",
-        project_name="Digital Lending Platform"
-    )
-
-    print(report.to_markdown())
-
-    # From a structured list of requirement strings
-    report2 = agent.recommend_from_list(
-        requirements=["REQ-01: ...", "REQ-02: ..."],
-        project_name="Payments Gateway"
-    )
+v2 changes:
+  - Dropped/lowered dimension floors so simple projects don't inflate to Spiral.
+  - Added project_size, complexity, uncertainty dimensions.
+  - Rebalanced Spiral catalogue scores (compliance/safety lowered).
+  - Rebalanced base weights: more even spread across all 10 criteria.
+  - Counts only SUPPORTED/EXPLICIT requirement signals, ignoring INFERRED/ASSUMPTION
+    boilerplate that the LLM tends to generate.
+  - Accepts original project description separately from generated requirements
+    for volatility, urgency, stakeholder, size, and uncertainty cues.
 """
 from __future__ import annotations
 
@@ -51,8 +37,11 @@ load_dotenv()
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  SDLC Model Catalogue
-#  Each model carries: description, criteria scores (1-100), strengths, risks,
-#  and finance-domain applicability notes.
+#  Scores are 1-100 per criterion.  v2: Spiral de-tuned on compliance/safety
+#  to remove near-dominance; Waterfall compliance slightly reduced; V-Model
+#  kept high for its niche; Agile boosted on adaptability criteria.
+#  Added: project_size_fit (small=high, large=high), complexity_fit,
+#         uncertainty_fit.
 # ─────────────────────────────────────────────────────────────────────────────
 
 SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
@@ -66,13 +55,16 @@ SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
             "a review before the next begins."
         ),
         "criteria": {
-            "compliance":    80.0,
-            "security":      60.0,
-            "speed":         30.0,
-            "adaptability":  20.0,
-            "safety":        70.0,
-            "testing_rigor": 70.0,
-            "stakeholder":   50.0,
+            "compliance":       75.0,   # v2: was 80
+            "security":         60.0,
+            "speed":            35.0,   # v2: was 30
+            "adaptability":     15.0,   # v2: was 20
+            "safety":           65.0,   # v2: was 70
+            "testing_rigor":    65.0,   # v2: was 70
+            "stakeholder":      40.0,   # v2: was 50
+            "project_size":     80.0,   # good for small projects
+            "complexity":       40.0,   # poor for complex systems
+            "uncertainty":      15.0,   # terrible when uncertain
         },
         "strengths": [
             "Easy to understand, use and manage because of its rigid structure.",
@@ -109,13 +101,16 @@ SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
             "and executed in a V-shaped sequence."
         ),
         "criteria": {
-            "compliance":    95.0,
-            "security":      80.0,
-            "speed":         40.0,
-            "adaptability":  30.0,
-            "safety":        98.0,
-            "testing_rigor": 98.0,
-            "stakeholder":   60.0,
+            "compliance":       92.0,   # v2: was 95
+            "security":         78.0,   # v2: was 80
+            "speed":            35.0,   # v2: was 40
+            "adaptability":     20.0,   # v2: was 30
+            "safety":           92.0,   # v2: was 98
+            "testing_rigor":    95.0,   # v2: was 98
+            "stakeholder":      50.0,   # v2: was 60
+            "project_size":     60.0,
+            "complexity":       70.0,
+            "uncertainty":      20.0,
         },
         "strengths": [
             "Strong traceability: each requirement maps to a test activity.",
@@ -156,13 +151,16 @@ SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
             "details may evolve. Can be combined with other models."
         ),
         "criteria": {
-            "compliance":    78.0,
-            "security":      72.0,
-            "speed":         78.0,
-            "adaptability":  75.0,
-            "safety":        75.0,
-            "testing_rigor": 80.0,
-            "stakeholder":   82.0,
+            "compliance":       72.0,   # v2: was 78
+            "security":         70.0,   # v2: was 72
+            "speed":            78.0,
+            "adaptability":     75.0,
+            "safety":           72.0,   # v2: was 75
+            "testing_rigor":    78.0,   # v2: was 80
+            "stakeholder":      82.0,
+            "project_size":     75.0,
+            "complexity":       72.0,
+            "uncertainty":      60.0,
         },
         "strengths": [
             "Working functionality is available early, and results arrive periodically.",
@@ -199,13 +197,16 @@ SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
             "often used as a technique alongside another model."
         ),
         "criteria": {
-            "compliance":    60.0,
-            "security":      55.0,
-            "speed":         85.0,
-            "adaptability":  92.0,
-            "safety":        55.0,
-            "testing_rigor": 60.0,
-            "stakeholder":   92.0,
+            "compliance":       45.0,   # v2: was 60
+            "security":         40.0,   # v2: was 55
+            "speed":            88.0,   # v2: was 85
+            "adaptability":     92.0,
+            "safety":           40.0,   # v2: was 55
+            "testing_rigor":    50.0,   # v2: was 60
+            "stakeholder":      92.0,
+            "project_size":     85.0,
+            "complexity":       55.0,
+            "uncertainty":      90.0,
         },
         "strengths": [
             "Users are involved before implementation and understand the system better.",
@@ -244,13 +245,16 @@ SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
             "produce reusable components. The system must be modularizable."
         ),
         "criteria": {
-            "compliance":    58.0,
-            "security":      55.0,
-            "speed":         96.0,
-            "adaptability":  88.0,
-            "safety":        55.0,
-            "testing_rigor": 62.0,
-            "stakeholder":   90.0,
+            "compliance":       45.0,   # v2: was 58
+            "security":         42.0,   # v2: was 55
+            "speed":            96.0,
+            "adaptability":     88.0,
+            "safety":           42.0,   # v2: was 55
+            "testing_rigor":    55.0,   # v2: was 62
+            "stakeholder":      90.0,
+            "project_size":     80.0,
+            "complexity":       50.0,
+            "uncertainty":      75.0,
         },
         "strengths": [
             "Reduced development time and short iterations with RAD tools.",
@@ -287,13 +291,16 @@ SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
             "can use prototyping or RAD to build the product."
         ),
         "criteria": {
-            "compliance":    85.0,
-            "security":      88.0,
-            "speed":         55.0,
-            "adaptability":  80.0,
-            "safety":        90.0,
-            "testing_rigor": 85.0,
-            "stakeholder":   70.0,
+            "compliance":       72.0,   # v2: was 85  ← KEY de-tune
+            "security":         75.0,   # v2: was 88  ← KEY de-tune
+            "speed":            45.0,   # v2: was 55
+            "adaptability":     78.0,   # v2: was 80
+            "safety":           78.0,   # v2: was 90  ← KEY de-tune
+            "testing_rigor":    75.0,   # v2: was 85  ← KEY de-tune
+            "stakeholder":      65.0,   # v2: was 70
+            "project_size":     30.0,   # bad for small projects (too heavy)
+            "complexity":       90.0,   # excellent for complex
+            "uncertainty":      82.0,   # good with uncertainty
         },
         "strengths": [
             "Explicit risk analysis in every cycle; risky parts are built first.",
@@ -320,7 +327,6 @@ SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
         ],
     },
     # ── Agile ────────────────────────────────────────────────────────────────
-    # Note: Agile is not covered in the slides; this entry draws on general knowledge.
     "Agile (Scrum)": {
         "iterative": True,
         "description": (
@@ -331,13 +337,16 @@ SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
             "regulated projects must add them explicitly."
         ),
         "criteria": {
-            "compliance":    50.0,
-            "security":      55.0,
-            "speed":         95.0,
-            "adaptability":  95.0,
-            "safety":        50.0,
-            "testing_rigor": 65.0,
-            "stakeholder":   95.0,
+            "compliance":       50.0,
+            "security":         52.0,   # v2: was 55
+            "speed":            95.0,
+            "adaptability":     95.0,
+            "safety":           48.0,   # v2: was 50
+            "testing_rigor":    62.0,   # v2: was 65
+            "stakeholder":      95.0,
+            "project_size":     90.0,   # great for small-medium
+            "complexity":       60.0,
+            "uncertainty":      85.0,   # handles uncertainty well
         },
         "strengths": [
             "Fast delivery and high customer responsiveness.",
@@ -365,22 +374,31 @@ SDLC_CATALOGUE: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# MCDA criteria with finance-domain baseline weights
-CRITERIA = ["compliance", "security", "speed", "adaptability", "safety", "testing_rigor", "stakeholder"]
+# ─────────────────────────────────────────────────────────────────────────────
+#  MCDA Criteria & Weights  (v2: 10 criteria, more balanced)
+# ─────────────────────────────────────────────────────────────────────────────
+
+CRITERIA = [
+    "compliance", "security", "speed", "adaptability", "safety",
+    "testing_rigor", "stakeholder", "project_size", "complexity", "uncertainty",
+]
 
 FINANCE_BASE_WEIGHTS: Dict[str, float] = {
-    "compliance":    0.22,
-    "security":      0.20,
-    "safety":        0.18,
-    "testing_rigor": 0.15,
-    "adaptability":  0.10,
-    "speed":         0.09,
-    "stakeholder":   0.06,
+    "compliance":    0.15,   # v2: was 0.22
+    "security":      0.14,   # v2: was 0.20
+    "safety":        0.12,   # v2: was 0.18
+    "testing_rigor": 0.10,   # v2: was 0.15
+    "adaptability":  0.10,   # v2: was 0.10
+    "speed":         0.10,   # v2: was 0.09
+    "stakeholder":   0.07,   # v2: was 0.06
+    "project_size":  0.08,   # NEW
+    "complexity":    0.07,   # NEW
+    "uncertainty":   0.07,   # NEW
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Pydantic-free dataclasses for lightweight portability
+#  Dataclasses
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -404,6 +422,10 @@ class ProjectDimensions:
     testing_rigor_needed: int     # 1-5
     stakeholder_availability: Optional[int]  # 1-5 or None
     time_to_market_urgency: Optional[int]    # 1-5 or None
+    # v2 new dimensions
+    project_size: int             # 1-5 (1=tiny internal, 5=enterprise platform)
+    complexity: int               # 1-5
+    uncertainty: int              # 1-5
 
     @staticmethod
     def label(val: Optional[int]) -> str:
@@ -431,7 +453,7 @@ class SDLCReport:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Dimension Extraction (rule-based, finance-aware)
+#  Signal Lists
 # ─────────────────────────────────────────────────────────────────────────────
 
 _REGULATORY_SIGNALS = [
@@ -448,7 +470,8 @@ _SECURITY_SIGNALS = [
 ]
 _VOLATILITY_SIGNALS = [
     "user story", "prototype", "feedback", "iterative", "mvp", "discovery",
-    "pivot", "changing requirements", "evolving", "exploratory",
+    "pivot", "changing requirements", "evolving", "exploratory", "agile",
+    "sprint", "flexible", "adapt",
 ]
 _SAFETY_SIGNALS = [
     "critical", "mission-critical", "failure", "downtime", "disaster recovery",
@@ -462,11 +485,33 @@ _TESTING_SIGNALS = [
 ]
 _URGENCY_SIGNALS = [
     "urgent", "asap", "immediately", "deadline", "fast", "quick", "time-to-market",
-    "launch by", "go live", "competitive pressure", "market window",
+    "launch by", "go live", "competitive pressure", "market window", "mvp",
 ]
 _STAKEHOLDER_SIGNALS = [
     "daily standup", "daily sync", "product owner", "dedicated stakeholder",
     "continuous collaboration", "business analyst", "full-time", "available",
+    "scrum master", "stakeholder meeting",
+]
+_SIZE_SIGNALS_LARGE = [
+    "enterprise", "core banking", "migration", "transformation", "platform",
+    "multi-module", "legacy", "nationwide", "bank-wide", "organization-wide",
+    "millions of users", "large-scale", "infrastructure",
+]
+_SIZE_SIGNALS_SMALL = [
+    "simple", "internal tool", "dashboard", "single page", "small team",
+    "script", "automation", "widget", "poc", "proof of concept", "demo",
+    "one-off", "utility",
+]
+_COMPLEXITY_SIGNALS = [
+    "microservice", "distributed", "real-time", "event-driven", "integration",
+    "api gateway", "multi-tenant", "multi-currency", "cross-border",
+    "reconciliation", "ledger", "settlement", "clearing", "orchestrat",
+    "workflow engine", "rules engine",
+]
+_UNCERTAINTY_SIGNALS = [
+    "unclear", "uncertain", "unknown", "exploratory", "research", "r&d",
+    "new market", "first time", "unproven", "experiment", "discover",
+    "prototype", "mvp", "pivot", "user testing",
 ]
 
 
@@ -475,14 +520,81 @@ def _count_signals(text: str, signals: List[str]) -> int:
     return sum(1 for s in signals if s in low)
 
 
-def _extract_dimensions(text: str) -> ProjectDimensions:
-    reg   = _count_signals(text, _REGULATORY_SIGNALS)
-    sec   = _count_signals(text, _SECURITY_SIGNALS)
-    vol   = _count_signals(text, _VOLATILITY_SIGNALS)
-    safe  = _count_signals(text, _SAFETY_SIGNALS)
-    test  = _count_signals(text, _TESTING_SIGNALS)
-    urg   = _count_signals(text, _URGENCY_SIGNALS)
-    stake = _count_signals(text, _STAKEHOLDER_SIGNALS)
+# ─────────────────────────────────────────────────────────────────────────────
+#  v2: Filter only SUPPORTED/EXPLICIT requirements for signal counting
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_supported_blocks(requirements_text: str) -> str:
+    """
+    From generated requirements markdown, extract only requirement blocks
+    marked as SUPPORTED or EXPLICIT.  This prevents LLM-inferred/assumed
+    boilerplate (AES-256, RBI, audit trail, etc.) from inflating scores.
+    
+    Falls back to full text if no evidence status markers are found.
+    """
+    # Split into requirement blocks (#### REQ-01, #### REQ-02, ...)
+    blocks = re.split(r'(?=####\s+REQ-)', requirements_text, flags=re.IGNORECASE)
+    
+    supported = []
+    has_markers = False
+    
+    for block in blocks:
+        if not block.strip():
+            continue
+        # Check for evidence status markers
+        status_match = re.search(
+            r'\*\*(?:Evidence\s+Status|Source)\s*:\*\*\s*\[?\s*(SUPPORTED|EXPLICIT|INFERRED|ASSUMPTION)',
+            block, re.IGNORECASE
+        )
+        if status_match:
+            has_markers = True
+            status = status_match.group(1).upper()
+            if status in ("SUPPORTED", "EXPLICIT"):
+                supported.append(block)
+        else:
+            # Non-REQ block (headers, etc.) — keep it
+            if not re.match(r'####\s+REQ-', block.strip(), re.IGNORECASE):
+                supported.append(block)
+    
+    if not has_markers:
+        # No markers found — fall back to full text
+        return requirements_text
+    
+    return "\n".join(supported) if supported else requirements_text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Dimension Extraction  (v2: separate description + requirements inputs)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_dimensions(
+    text: str,
+    project_description: str = "",
+) -> ProjectDimensions:
+    """
+    Extract project dimensions from TWO sources:
+    - requirements_text (filtered to SUPPORTED only) for compliance/security/safety/testing
+    - project_description (original user input) for volatility/urgency/stakeholder/size/complexity/uncertainty
+    
+    v2: Floors LOWERED from max(3,...) to max(2,...) so simple projects score differently.
+    """
+    # For compliance/security/testing/safety: use requirement signals only
+    supported_text = _extract_supported_blocks(text)
+    reg  = _count_signals(supported_text, _REGULATORY_SIGNALS)
+    sec  = _count_signals(supported_text, _SECURITY_SIGNALS)
+    safe = _count_signals(supported_text, _SAFETY_SIGNALS)
+    test = _count_signals(supported_text, _TESTING_SIGNALS)
+
+    # For volatility/urgency/stakeholder/size/complexity/uncertainty:
+    # prefer the original project description if available
+    desc = project_description.strip() if project_description else text
+    vol   = _count_signals(desc, _VOLATILITY_SIGNALS)
+    urg   = _count_signals(desc, _URGENCY_SIGNALS)
+    stake = _count_signals(desc, _STAKEHOLDER_SIGNALS)
+    large = _count_signals(desc, _SIZE_SIGNALS_LARGE)
+    small = _count_signals(desc, _SIZE_SIGNALS_SMALL)
+    cmplx = _count_signals(desc, _COMPLEXITY_SIGNALS)
+    uncrt = _count_signals(desc, _UNCERTAINTY_SIGNALS)
 
     def scale(count: int, low: int, high: int) -> int:
         """Map raw count to 1-5 scale."""
@@ -492,14 +604,33 @@ def _extract_dimensions(text: str) -> ProjectDimensions:
             return 5
         return max(1, min(5, 1 + round((count - low) / max(high - low, 1) * 4)))
 
-    # Finance default: regulatory and security always have elevated floors
-    reg_criticality = max(3, scale(reg, 1, 5))   # finance floor = 3
-    security_risk   = max(3, scale(sec, 1, 6))
-    volatility      = scale(vol, 0, 4)
-    failure_impact  = max(3, scale(safe, 1, 4))
-    testing_rigor   = max(3, scale(test, 1, 5))
-    urgency         = scale(urg, 1, 4) if urg > 0 else None
-    stakeholder     = scale(stake, 1, 3) if stake > 0 else None
+    # v2: lowered floors from 3 to 2 for finance domain
+    reg_criticality = max(2, scale(reg, 1, 6))
+    security_risk   = max(2, scale(sec, 1, 7))
+    failure_impact  = max(2, scale(safe, 1, 5))
+    testing_rigor   = max(2, scale(test, 1, 5))
+    
+    volatility      = scale(vol, 0, 5)
+    urgency         = scale(urg, 0, 4) if urg > 0 else None
+    stakeholder     = scale(stake, 0, 3) if stake > 0 else None
+
+    # Project size: net of large vs small signals
+    size_net = large - small
+    if size_net >= 3:
+        project_size = 5
+    elif size_net >= 1:
+        project_size = 4
+    elif size_net == 0 and large == 0:
+        project_size = 2  # default: small-medium
+    elif size_net == 0:
+        project_size = 3
+    elif size_net <= -2:
+        project_size = 1
+    else:
+        project_size = 2
+
+    complexity = max(1, scale(cmplx, 0, 5))
+    uncertainty = max(1, scale(uncrt, 0, 4))
 
     return ProjectDimensions(
         regulatory_criticality=reg_criticality,
@@ -509,6 +640,9 @@ def _extract_dimensions(text: str) -> ProjectDimensions:
         testing_rigor_needed=testing_rigor,
         time_to_market_urgency=urgency,
         stakeholder_availability=stakeholder,
+        project_size=project_size,
+        complexity=complexity,
+        uncertainty=uncertainty,
     )
 
 
@@ -538,40 +672,71 @@ def _extract_compliance_flags(text: str) -> List[str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Dynamic Weight Computation
+#  Dynamic Weight Computation (v2: responds to ALL 10 dimensions)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _compute_dynamic_weights(dims: ProjectDimensions) -> Dict[str, float]:
     """
     Adjust MCDA weights dynamically based on extracted project dimensions.
-    Finance domain always applies elevated floors for compliance and security.
+    v2: responds to all 10 dimensions including size, complexity, uncertainty.
     """
     w = dict(FINANCE_BASE_WEIGHTS)
 
     # Boost compliance weight if regulatory criticality is very high
-    if dims.regulatory_criticality >= 5:
-        w["compliance"] += 0.05
-        w["speed"] -= 0.03
-        w["stakeholder"] -= 0.02
+    if dims.regulatory_criticality >= 4:
+        w["compliance"] += 0.03
+        w["speed"] -= 0.015
+        w["uncertainty"] -= 0.015
 
-    # Boost security if security risk is very high
-    if dims.security_risk >= 5:
-        w["security"] += 0.04
-        w["adaptability"] -= 0.02
-        w["stakeholder"] -= 0.02
+    # Boost security if security risk is high
+    if dims.security_risk >= 4:
+        w["security"] += 0.03
+        w["adaptability"] -= 0.015
+        w["uncertainty"] -= 0.015
 
     # Boost speed if urgency is known and high
     if dims.time_to_market_urgency and dims.time_to_market_urgency >= 4:
         w["speed"] += 0.04
+        w["compliance"] -= 0.015
+        w["safety"] -= 0.015
+        w["project_size"] -= 0.01
+
+    # Boost adaptability and uncertainty for volatile requirements
+    if dims.requirement_volatility >= 3:
+        w["adaptability"] += 0.02
+        w["uncertainty"] += 0.02
+        w["testing_rigor"] -= 0.02
         w["compliance"] -= 0.02
-        w["safety"] -= 0.02
 
-    # Boost adaptability for volatile requirements
-    if dims.requirement_volatility >= 4:
-        w["adaptability"] += 0.03
-        w["testing_rigor"] -= 0.03
+    # Project size: small projects → boost project_size weight (favors lightweight)
+    if dims.project_size <= 2:
+        w["project_size"] += 0.03
+        w["complexity"] -= 0.015
+        w["safety"] -= 0.015
+    elif dims.project_size >= 4:
+        w["complexity"] += 0.02
+        w["project_size"] -= 0.02
 
-    # Normalize to sum = 1.0
+    # Complexity: boost for complex projects
+    if dims.complexity >= 4:
+        w["complexity"] += 0.03
+        w["speed"] -= 0.015
+        w["project_size"] -= 0.015
+
+    # Uncertainty: boost when high
+    if dims.uncertainty >= 3:
+        w["uncertainty"] += 0.02
+        w["compliance"] -= 0.01
+        w["safety"] -= 0.01
+
+    # Stakeholder availability: boost when high
+    if dims.stakeholder_availability and dims.stakeholder_availability >= 4:
+        w["stakeholder"] += 0.02
+        w["safety"] -= 0.01
+        w["testing_rigor"] -= 0.01
+
+    # Normalize to sum = 1.0 and clamp negatives
+    w = {k: max(v, 0.01) for k, v in w.items()}
     total = sum(w.values())
     return {k: round(v / total, 4) for k, v in w.items()}
 
@@ -581,11 +746,11 @@ def _compute_dynamic_weights(dims: ProjectDimensions) -> Dict[str, float]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _suitability_label(score: float) -> str:
-    if score >= 85.0:
+    if score >= 80.0:
         return "Highly Recommended"
-    if score >= 72.0:
+    if score >= 68.0:
         return "Recommended"
-    if score >= 58.0:
+    if score >= 55.0:
         return "Moderate"
     return "Unsuitable"
 
@@ -738,8 +903,11 @@ def _render_markdown(report: SDLCReport) -> str:
         f"| Requirement Volatility | {dims.requirement_volatility}/5 | {ProjectDimensions.label(dims.requirement_volatility)} |",
         f"| System Failure Impact | {dims.system_failure_impact}/5 | {ProjectDimensions.label(dims.system_failure_impact)} |",
         f"| Testing Rigor Needed | {dims.testing_rigor_needed}/5 | {ProjectDimensions.label(dims.testing_rigor_needed)} |",
-        f"| Time-to-Market Urgency | {dims.time_to_market_urgency}/5 | {ProjectDimensions.label(dims.time_to_market_urgency)} |",
-        f"| Stakeholder Availability | {dims.stakeholder_availability}/5 | {ProjectDimensions.label(dims.stakeholder_availability)} |",
+        f"| Time-to-Market Urgency | {dims.time_to_market_urgency or '-'}/5 | {ProjectDimensions.label(dims.time_to_market_urgency)} |",
+        f"| Stakeholder Availability | {dims.stakeholder_availability or '-'}/5 | {ProjectDimensions.label(dims.stakeholder_availability)} |",
+        f"| Project Size | {dims.project_size}/5 | {ProjectDimensions.label(dims.project_size)} |",
+        f"| Complexity | {dims.complexity}/5 | {ProjectDimensions.label(dims.complexity)} |",
+        f"| Uncertainty | {dims.uncertainty}/5 | {ProjectDimensions.label(dims.uncertainty)} |",
         "",
         "---",
         "",
@@ -924,7 +1092,10 @@ def _generate_llm_rationale(
         f"Security Risk={dims.security_risk}/5, "
         f"Volatility={dims.requirement_volatility}/5, "
         f"Failure Impact={dims.system_failure_impact}/5, "
-        f"Testing Rigor={dims.testing_rigor_needed}/5"
+        f"Testing Rigor={dims.testing_rigor_needed}/5, "
+        f"Project Size={dims.project_size}/5, "
+        f"Complexity={dims.complexity}/5, "
+        f"Uncertainty={dims.uncertainty}/5"
     )
     top3 = "\n".join(
         f"{m.rank}. {m.model_name} — Score: {m.score:.1f} ({m.suitability})"
@@ -955,6 +1126,10 @@ class SDLCAgent:
     Supports two ingestion modes:
       - recommend_from_text()   : plain text (project description / requirements notes)
       - recommend_from_list()   : structured list of requirement strings
+      
+    v2: accepts optional project_description to separate original user input
+    from LLM-generated requirements. This feeds volatility/urgency/stakeholder
+    cues from the description, not from inflated generated requirements.
     """
 
     def __init__(
@@ -963,7 +1138,6 @@ class SDLCAgent:
         model_name: Optional[str] = None,
         use_llm_rationale: bool = True,
     ):
-        # Configuration is handled by app.core.llm for the LM Studio endpoint.
         if api_key:
             os.environ["LLM_API_KEY"] = api_key
         if model_name:
@@ -977,30 +1151,40 @@ class SDLCAgent:
         self,
         requirements_text: str,
         project_name: str = "Finance Project",
+        project_description: str = "",
     ) -> SDLCReport:
         """
         Analyse plain text (project description, meeting notes, stakeholder inputs,
         or extracted requirements) and produce a full SDLC recommendation.
+        
+        v2: If project_description is provided, it is used separately to extract
+        volatility, urgency, stakeholder, size, complexity, and uncertainty cues.
         """
-        return self._run_pipeline(requirements_text, project_name)
+        return self._run_pipeline(requirements_text, project_name, project_description)
 
     def recommend_from_list(
         self,
         requirements: List[str],
         project_name: str = "Finance Project",
+        project_description: str = "",
     ) -> SDLCReport:
         """
         Accept a structured list of requirement strings, join them into a single
         analysis corpus, and produce a full SDLC recommendation.
         """
         combined = "\n".join(requirements)
-        return self._run_pipeline(combined, project_name)
+        return self._run_pipeline(combined, project_name, project_description)
 
     # ── Internal Pipeline ─────────────────────────────────────────────────────
 
-    def _run_pipeline(self, text: str, project_name: str) -> SDLCReport:
-        # 1. Extract project dimensions
-        dims = _extract_dimensions(text)
+    def _run_pipeline(
+        self,
+        text: str,
+        project_name: str,
+        project_description: str = "",
+    ) -> SDLCReport:
+        # 1. Extract project dimensions (v2: from both sources)
+        dims = _extract_dimensions(text, project_description)
 
         # 2. Detect compliance frameworks
         compliance_flags = _extract_compliance_flags(text)
@@ -1028,7 +1212,9 @@ class SDLCAgent:
             f"Runner-up models: {top3_names}. "
             f"Key drivers: regulatory criticality={dims.regulatory_criticality}/5, "
             f"security risk={dims.security_risk}/5, "
-            f"testing rigor={dims.testing_rigor_needed}/5."
+            f"project size={dims.project_size}/5, "
+            f"complexity={dims.complexity}/5, "
+            f"uncertainty={dims.uncertainty}/5."
         )
 
         # 9. Input summary

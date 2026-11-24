@@ -89,6 +89,10 @@ export async function getSDLCCatalogue() {
   return request("/sdlc/catalogue");
 }
 
+export async function checkBackendHealth() {
+  return request("/health");
+}
+
 // ── Full Pipeline ─────────────────────────────────────────────────────────────
 
 /**

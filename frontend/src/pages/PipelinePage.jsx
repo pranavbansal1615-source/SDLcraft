@@ -7,7 +7,7 @@ import RequirementsDisplay from '../components/RequirementsDisplay'
 import SDLCReportDisplay from '../components/SDLCReportDisplay'
 import LoadingOverlay from '../components/LoadingOverlay'
 import ErrorBanner from '../components/ErrorBanner'
-import { runPipelineFromText, runPipelineFromPDF } from '../services/api'
+import { checkBackendHealth, runPipelineFromText, runPipelineFromPDF } from '../services/api'
 
 export default function PipelinePage() {
   const [searchParams] = useSearchParams()
@@ -25,6 +25,24 @@ export default function PipelinePage() {
   const [loadingStep, setLoadingStep] = useState(0)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
+  const [backendStatus, setBackendStatus] = useState('checking')
+
+  useEffect(() => {
+    let active = true
+    const refreshBackendStatus = () => checkBackendHealth()
+      .then(() => {
+        if (active) setBackendStatus('connected')
+      })
+      .catch(() => {
+        if (active) setBackendStatus('unavailable')
+      })
+    refreshBackendStatus()
+    const intervalId = setInterval(refreshBackendStatus, 10000)
+    return () => {
+      active = false
+      clearInterval(intervalId)
+    }
+  }, [])
 
   const isValid = mode === 'text'
     ? projectName.trim() && description.trim()
@@ -102,8 +120,18 @@ export default function PipelinePage() {
             <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
               <ModeToggle mode={mode} onChange={(m) => { setMode(m); setError(null) }} />
               <div className="flex items-center gap-2 text-xs text-slate-500">
-                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-                Backend connected
+                <div className={`w-2 h-2 rounded-full ${
+                  backendStatus === 'connected'
+                    ? 'bg-emerald-400'
+                    : backendStatus === 'checking'
+                      ? 'bg-amber-400 animate-pulse'
+                      : 'bg-red-400'
+                }`}></div>
+                {backendStatus === 'checking'
+                  ? 'Checking backend…'
+                  : backendStatus === 'connected'
+                    ? 'Backend connected'
+                    : 'Backend unavailable — start the API server'}
               </div>
             </div>
 

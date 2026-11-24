@@ -471,15 +471,23 @@ Each passage is labelled [E1], [E2], … — cite ONLY these labels; never inven
 
 ---
 
-## FINANCE DOMAIN CONSTRAINTS (apply automatically where relevant)
+## FINANCE DOMAIN CONSTRAINTS (apply SELECTIVELY — read this carefully)
 
-- Regulatory: RBI Digital Lending Guidelines, SEBI, DPDP Act 2023, PCI-DSS v4, AML/KYC, SOX, GLBA
-- Security: AES-256 at rest, TLS 1.2+ in transit, MFA, RBAC, audit logs, session management, data masking
-- Availability / SLA: 99.9%+ uptime for critical transaction paths
-- Fraud & anomaly detection for all payment and lending flows
-- Data retention: minimum 7 years for financial records (RBI mandate)
+Apply the constraints below **only** when the retrieved context or user intent explicitly mentions them.
 
-Add these only where RELEVANT to the user intent or directly evidenced in the retrieved context.
+| Constraint | Apply only when context or intent mentions… |
+|---|---|
+| RBI / SEBI / DPDP / PCI-DSS / AML / KYC / SOX | …a regulated product: lending, payments, banking, trading, insurance |
+| AES-256 / TLS / MFA / RBAC | …user authentication, PII storage, or financial transactions |
+| 99.9%+ uptime SLA | …production systems, transaction-critical paths, or SLA requirements |
+| 7-year data retention | …financial transaction records or audit mandates |
+| Fraud / anomaly detection | …payment flows, loan disbursals, or account operations |
+
+**If the uploaded document is an internal tool spec, dashboard design, prototype, or MVP brief
+with no mention of regulations, PII, or financial transactions — do NOT inject compliance boilerplate.**
+Any requirement sourced from general finance knowledge (not from the retrieved context) must be
+marked `ASSUMPTION`, not `INFERRED`.
+
 NEVER fabricate regulatory clause numbers or thresholds not present in the context.
 
 ---
@@ -583,17 +591,24 @@ to you — no document retrieval is needed. Analyse it in full and produce a com
 
 ---
 
-## FINANCE DOMAIN CONSTRAINTS (apply automatically where relevant)
+## FINANCE DOMAIN CONSTRAINTS (apply SELECTIVELY — read this carefully)
 
-Since this is a **finance / fintech project**, apply the following where relevant:
-- Regulatory: RBI guidelines, SEBI, DPDP Act 2023, PCI-DSS v4, AML/KYC, SOX, GLBA, FCRA
-- Security: AES-256 at rest, TLS 1.2+ in transit, MFA, RBAC, immutable audit logs, session timeouts, PII masking
-- Availability: 99.9%+ uptime SLA for transaction-critical paths
-- Fraud detection and anomaly alerting for payments, lending, and account operations
-- Data retention: 7 years minimum for financial transaction records (RBI)
-- Accessibility: WCAG 2.1 AA for user-facing products
+This project may be in the finance / fintech domain. Apply the constraints below **only** when
+the project description explicitly mentions or clearly implies them.
 
-Apply these ONLY where relevant to the project. Never fabricate regulatory clause numbers.
+| Constraint | Apply only when the description mentions… |
+|---|---|
+| RBI / SEBI / DPDP / PCI-DSS / AML / KYC / SOX | …a regulated product: lending, payments, banking, trading, insurance |
+| AES-256 / TLS / MFA / RBAC | …user authentication, PII storage, or financial transactions |
+| 99.9%+ uptime SLA | …production systems, transaction-critical paths, or SLA requirements |
+| 7-year data retention | …financial transaction records or audit mandates |
+| Fraud / anomaly detection | …payment flows, loan disbursals, or account operations |
+
+**If the project is an internal tool, dashboard, prototype, MVP, or admin utility with no mention
+of regulations, PII, or financial transactions — do NOT inject compliance/security boilerplate.**
+Mark any requirement you add from general finance knowledge as `ASSUMPTION`, not `INFERRED`.
+
+Never fabricate regulatory clause numbers or thresholds not present in the description.
 
 ---
 
@@ -608,7 +623,10 @@ Apply these ONLY where relevant to the project. Never fabricate regulatory claus
    - Performance requirements (measurable SLAs)
    - Usability requirements (UX and accessibility)
 4. For each requirement, state your reasoning and whether it was explicitly stated, inferred, or assumed.
-5. Flag anything missing or ambiguous in the description.
+5. Distinguish evidence status precisely:
+   - **SUPPORTED** — explicitly stated in the project description
+   - **INFERRED** — a direct, necessary logical consequence of something explicit (e.g. "supports payments" implies "needs idempotency")
+   - **ASSUMPTION** — added from general finance knowledge NOT mentioned in the description; mark these clearly so they don't bias SDLC model selection
 
 ---
 
@@ -642,7 +660,7 @@ The system shall ...
 **Reasoning:**
 [Why this requirement is needed — reference specific parts of the project description]
 
-**Source:** [EXPLICIT — stated in description | INFERRED — logical extension | ASSUMPTION — not in description]
+**Source:** [EXPLICIT — stated verbatim in description | INFERRED — necessary logical consequence of something explicit | ASSUMPTION — added from general finance/domain knowledge not mentioned in description]
 
 ---
 
@@ -666,9 +684,12 @@ If none: > None identified.
 
 ## FINAL RULE
 
-Work only from the project description provided. Be thorough — a finance project must have
-complete security, compliance, and reliability requirements, not just functional ones.
-Quality and testability matter more than quantity.
+Work only from the project description provided. Be thorough — but be **accurate**.
+Only include security, compliance, and regulatory requirements if the project description
+actually warrants them. A simple internal tool, dashboard, or prototype does NOT need
+AES-256, MFA, RBI, or audit-log requirements unless those are explicitly mentioned.
+Mark everything not in the description as ASSUMPTION so downstream analysis is not biased.
+Quality and accurate traceability matter more than quantity.
 """
     ),
 )
